@@ -1,0 +1,32 @@
+<html lang="en-NG"><head><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Field Business Registry</title>
+
+    <!-- 1. Try to load from the Internet (Online Mode) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <!-- 2. Fallback to Local Files (Offline Mode) -->
+    <script>
+        // If Tailwind didn't load from the internet, load the local file
+        if (typeof tailwind === 'undefined') {
+            document.write('<script src="tailwindcss.js"><\/script>');
+        }
+        // If Chart.js didn't load, load the local file
+        if (typeof Chart === 'undefined') {
+            document.write('<script src="chart.js"><\/script>');
+        }
+        // If PapaParse didn't load, load the local file
+        if (typeof Papa === 'undefined') {
+            document.write('<script src="papaparse.js"><\/script>');
+        }
+    </script>
+    
+    <style>
+        /* Hide sections by default */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>

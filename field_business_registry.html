@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Field Business Registry - Local DB</title>
+    
+    <!-- 1. Try to load from the Internet (Online Mode) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- 2. Fallback to Local Files (Offline Mode) -->
+    <script>
+        if (typeof tailwind === 'undefined') {
+            document.write('<script src="tailwindcss.js"><\/script>');
+        }
+        if (typeof Chart === 'undefined') {
+            document.write('<script src="chart.js"><\/script>');
+        }
+        if (typeof Papa === 'undefined') {
+            document.write('<script src="papaparse.js"><\/script>');
+        }
+        if (typeof JSZip === 'undefined') {
+            document.write('<script src="jszip.js"><\/script>');
+        }
+        if (typeof ExcelJS === 'undefined') {
+            document.write('<script src="exceljs.js"><\/script>');
+        }
+    </script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .tab-active { border-bottom: 2px solid #2563eb; color: #2563eb; }
+        .hidden { display: none !important; }
+        
+        #toast-container { position: fixed; bottom: 1rem; right: 1rem; z-index: 50; }
+        .toast { background: #1f2937; color: white; padding: 1rem; border-radius: 0.5rem; margin-top: 0.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); opacity: 0; transition: opacity 0.3s; }
+        .toast.show { opacity: 1; }
+        
+        /* Custom scrollbar for table */
+        .table-container::-webkit-scrollbar { height: 8px; width: 8px; }
+        .table-container::-webkit-scrollbar-track { background: #f1f1f1; }
+        .table-container::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+    </style>
+</head>
+<body class="text-gray-800 flex flex-col min-h-screen">
+
+    <div id="toast-container"></div>
+
+    <!-- Navigation & Database Connection Bar -->
+    <nav class="bg-white shadow-sm mb-6 sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex flex-col md:flex-row justify-between md:h-16 py-4 md:py-0">
+                <div class="flex items-center mb-4 md:mb-0">
+                    <svg class="h-8 w-8 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                    <span class="font-bold text-xl text-gray-900">Field Business Registry</span>
+                </div>
+                
+                <!-- DB Status & Actions -->
+                <div class="flex items-center space-x-4 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200">
+                    <div id="db-status-indicator" class="h-3 w-3 rounded-full bg-red-500"></div>
+                    <span id="db-status-text" class="text-sm font-medium text-gray-700">No Database Connected</span>
+                    
+                    <div class="border-l border-gray-300 h-6 mx-2"></div>
+                    
+                    <button onclick="createDatabase()" class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 transition shadow-sm">Create New DB</button>
+                    <button onclick="openDatabase()" class="text-xs bg-gray-200 text-gray-800 px-3 py-1.5 rounded hover:bg-gray-300 transition shadow-sm">Open DB</button>
+                </div>
+            </div>
+            
+            <!-- Tabs -->
+            <div class="flex space-x-8 items-center border-t border-gray-100 mt-2 md:mt-0">
+                <button onclick="switchTab('form')" id="tab-form" class="tab-active py-3 px-1 inline-flex items-center text-sm font-medium transition-colors">
+                    Registration Form
+                </button>
+                <button onclick="switchTab('dashboard')" id="tab-dashboard" class="text-gray-500 hover:text-gray-700 py-3 px-1 inline-flex items-center text-sm font-medium transition-colors">
+                    Dashboard & Analysis
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12 w-full">
+        
+        <!-- API Warning -->
+        <div id="api-warning" class="hidden mb-6 bg-red-50 border-l-4 border-red-400 p-4 rounded-md shadow-sm">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm text-red-700">Your browser does not support the Direct File System Access API. Please use a modern Chromium browser (Chrome, Edge, Opera) for this application to work.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- FORM SECTION -->
+        <section id="section-form" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 md:p-8">
+            <div class="mb-6 border-b pb-4">
+                <h2 class="text-2xl font-semibold text-gray-800">New Business Registration</h2>
+                <p class="text-sm text-gray-500 mt-1">Please ensure a database is connected before filling out this form.</p>
+            </div>
+            
+            <!-- WhatsApp Import -->
+            <div class="mb-6 bg-green-50 p-4 rounded-md border border-green-200 shadow-sm">
+                <label class="block text-sm font-medium text-green-800 mb-2">Import from WhatsApp Chat (.zip) <span class="text-xs font-normal text-green-600 ml-2">(Auto-fills the form below)</span></label>
+                <input type="file" id="whatsappImport" accept=".zip" class="block w-full text-sm text-green-700 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-800 hover:file:bg-green-200 cursor-pointer transition-colors">
+            </div>
+
+            <form id="registryForm" class="space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">DLI Type <span class="text-red-500">*</span></label>
+                        <select id="dliType" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2.5 bg-gray-50">
+                            <option value="">Select DLI Type</option>
+                            <option value="DLI 1.1A">DLI 1.1A</option>
+                            <option value="DLI 1.3A">DLI 1.3A</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Form Number <span class="text-red-500">*</span></label>
+                        <input type="text" id="formNumber" required pattern="\d{4}" maxlength="4" minlength="4" placeholder="e.g. 0001" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2.5 bg-gray-50">
+                        <p class="text-xs text-gray-500 mt-1">Must be exactly 4 digits. Checked for duplicates.</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Name of Business Owner <span class="text-red-500">*</span></label>
+                        <input type="text" id="ownerName" required placeholder="Full Name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2.5 bg-gray-50">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Phone Number <span class="text-red-500">*</span></label>
+                        <input type="tel" id="phoneNumber" required placeholder="080XXXXXXXX" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2.5 bg-gray-50">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Community <span class="text-red-500">*</span></label>
+                        <input type="text" id="community" oninput="autoSelectLGA()" required placeholder="Enter community name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2.5 bg-gray-50">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Local Government Area (LGA) <span class="text-red-500">*</span></label>
+                        <select id="lga" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2.5 bg-gray-50">
+                            <option value="">Select LGA</option>
+                            <option value="Brass">Brass</option>
+                            <option value="Ekeremor">Ekeremor</option>
+                            <option value="Kolokuma/Opokuma">Kolokuma/Opokuma</option>
+                            <option value="Nembe">Nembe</option>
+                            <option value="Ogbia">Ogbia</option>
+                            <option value="Sagbama">Sagbama</option>
+                            <option value="Southern Ijaw">Southern Ijaw</option>
+                            <option value="Yenagoa">Yenagoa</option>
+                        </select>
+                        <p class="text-xs text-green-600 mt-1">Auto-selected based on Community.</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Nature of Business Activity <span class="text-red-500">*</span></label>
+                        <select id="businessActivity" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2.5 bg-gray-50">
+                            <option value="">Select Activity</option>
+                            <option value="Food Vendor">Food Vendor</option>
+                            <option value="Mini Provision store">Mini Provision store</option>
+                            <option value="Fruit & Vegetables Seller">Fruit & Vegetables Seller</option>
+                            <option value="POS/Airtime Agent">POS/Airtime Agent</option>
+                            <option value="Boutique/Clothes Sale">Boutique/Clothes Sale</option>
+                            <option value="Hairdressing/Barbing Salon">Hairdressing/Barbing Salon</option>
+                            <option value="Tailoring/Fashion Designer">Tailoring/Fashion Designer</option>
+                            <option value="Laundry & Dry Cleaning">Laundry & Dry Cleaning</option>
+                            <option value="Catering Services">Catering Services</option>
+                            <option value="Others">Others</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Agent Name <span class="text-red-500">*</span></label>
+                        <input type="text" id="agentName" required placeholder="Enumerating Agent" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2.5 bg-gray-50">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Date of Enumeration <span class="text-red-500">*</span></label>
+                        <input type="date" id="enumDate" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2.5 bg-gray-50">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Business Picture</label>
+                        <input type="file" id="businessPic" accept="image/*" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-gray-300 rounded-md bg-gray-50 cursor-pointer transition">
+                        <p class="text-xs text-gray-500 mt-1">Image will be embedded into the database file.</p>
+                    </div>
+                </div>
+
+                <div class="pt-6 border-t mt-8 flex items-center justify-between">
+                    <p class="text-sm text-gray-500">Data writes directly to your selected PC file.</p>
+                    <div class="flex space-x-3">
+                        <button type="button" id="cancelEditBtn" onclick="cancelEdit()" class="hidden bg-gray-200 text-gray-800 py-2.5 px-4 rounded-md hover:bg-gray-300 transition-colors font-medium shadow-sm">
+                            Cancel
+                        </button>
+                        <button type="submit" id="submitBtn" class="bg-blue-600 text-white py-2.5 px-8 rounded-md hover:bg-blue-700 transition-colors font-medium shadow-sm flex items-center">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                            <span id="submitBtnText">Save Directly to PC</span>
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </section>
+
+        <!-- DASHBOARD SECTION -->
+        <section id="section-dashboard" class="hidden space-y-6">
+            
+            <!-- Key Metrics -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 flex flex-col justify-center items-center">
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Businesses</h3>
+                    <p class="text-4xl font-bold text-gray-900 mt-2" id="stat-total">0</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 flex flex-col justify-center items-center">
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wider">DLI 1.1A Count</h3>
+                    <p class="text-4xl font-bold text-blue-600 mt-2" id="stat-11a">0</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 flex flex-col justify-center items-center">
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wider">DLI 1.3A Count</h3>
+                    <p class="text-4xl font-bold text-emerald-600 mt-2" id="stat-13a">0</p>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4 text-center">Business Activity Breakdown</h3>
+                    <div class="h-64 relative w-full">
+                        <canvas id="activityChart"></canvas>
+                    </div>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4 text-center">DLI Type Distribution</h3>
+                    <div class="h-64 relative w-full">
+                        <canvas id="dliChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Table -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                <div class="p-6 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50">
+                    <div>
+                        <h2 class="text-xl font-semibold text-gray-800">Database Records</h2>
+                        <p class="text-sm text-gray-500">Showing entries from connected JSON database.</p>
+                    </div>
+                    <div class="flex flex-col sm:flex-row gap-3 items-center">
+                        <!-- Sorting Controls -->
+                        <div class="flex items-center space-x-2 bg-white border border-gray-300 rounded-md p-1 shadow-sm">
+                            <span class="text-xs text-gray-500 pl-2 font-medium">Sort:</span>
+                            <select id="sortField" onchange="handleSortChange()" class="text-sm border-none focus:ring-0 bg-transparent py-1 pl-1 pr-6 cursor-pointer text-gray-700 outline-none">
+                                <option value="timestamp">Newest First (Default)</option>
+                                <option value="community">Community</option>
+                                <option value="agentName">Agent Name</option>
+                                <option value="enumDate">Date of Enumeration</option>
+                            </select>
+                            <button id="sortOrderBtn" onclick="toggleSortOrder()" class="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded transition" title="Toggle Ascending/Descending">
+                                <svg id="sortIconDesc" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path></svg>
+                                <svg id="sortIconAsc" class="w-4 h-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4 4m0 0l-4-4m4 4v12"></path></svg>
+                            </button>
+                        </div>
+                        
+                        <button onclick="exportExcelWithImages()" class="bg-blue-600 text-white hover:bg-blue-700 py-2 px-4 rounded shadow-sm text-sm font-medium transition flex items-center">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            Export Excel (with Images)
+                        </button>
+
+                        <button onclick="exportCSV()" class="bg-emerald-600 text-white hover:bg-emerald-700 py-2 px-4 rounded shadow-sm text-sm font-medium transition flex items-center">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                            Export to CSV
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="overflow-x-auto table-container">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-white">
+                            <tr>
+                                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Form #</th>
+                                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Owner & Contact</th>
+                                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Activity</th>
+                                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Community / LGA</th>
+                                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">DLI Type</th>
+                                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Date & Agent</th>
+                                <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Photo</th>
+                                <th class="px-6 py-4 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dataTableBody" class="bg-white divide-y divide-gray-100">
+                            <!-- Data injected here -->
+                        </tbody>
+                    </table>
+                    <div id="empty-state" class="hidden p-12 text-center text-gray-500">
+                        No records found in the database.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        /* =========================================
+           STATE & CONFIGURATION
+        ========================================= */
+        let fileHandle = null;
+        let registryData = [];
+        let activityChartInstance = null;
+        let dliChartInstance = null;
+        let editingId = null;
+        
+        let sortState = {
+            field: 'timestamp',
+            order: 'desc'
+        };
+
+        if (!('showOpenFilePicker' in window)) {
+            document.getElementById('api-warning').classList.remove('hidden');
+        }
+
+        document.getElementById('enumDate').valueAsDate = new Date();
+
+        function showToast(message, isError = false) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${isError ? 'bg-red-600' : 'bg-gray-800'}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            
+            setTimeout(() => toast.classList.add('show'), 10);
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        function switchTab(tabId) {
+            document.getElementById('section-form').classList.add('hidden');
+            document.getElementById('section-dashboard').classList.add('hidden');
+            
+            document.getElementById('tab-form').classList.remove('tab-active', 'text-gray-500');
+            document.getElementById('tab-dashboard').classList.remove('tab-active', 'text-gray-500');
+            
+            document.getElementById('tab-form').classList.add('text-gray-500');
+            document.getElementById('tab-dashboard').classList.add('text-gray-500');
+
+            document.getElementById(`section-${tabId}`).classList.remove('hidden');
+            document.getElementById(`tab-${tabId}`).classList.add('tab-active');
+            document.getElementById(`tab-${tabId}`).classList.remove('text-gray-500');
+
+            if (tabId === 'dashboard') {
+                if(!fileHandle) {
+                    showToast("No database connected. Displaying empty dashboard.", true);
+                }
+                updateDashboard();
+            }
+        }
+
+        function updateDBStatusUI(fileName) {
+            const indicator = document.getElementById('db-status-indicator');
+            const text = document.getElementById('db-status-text');
+            
+            if (fileName) {
+                indicator.classList.remove('bg-red-500');
+                indicator.classList.add('bg-green-500');
+                text.textContent = `Connected: ${fileName}`;
+            } else {
+                indicator.classList.remove('bg-green-500');
+                indicator.classList.add('bg-red-500');
+                text.textContent = `No Database Connected`;
+            }
+        }
+
+        /* =========================================
+           FILE SYSTEM ACCESS API
+        ========================================= */
+        async function createDatabase() {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: 'registry_db.json',
+                    types: [{ description: 'JSON Database File', accept: { 'application/json': ['.json'] } }],
+                });
+                fileHandle = handle;
+                registryData = [];
+                await writeDataToFile(registryData);
+                updateDBStatusUI(fileHandle.name);
+                showToast("New database created and connected!");
+                updateDashboard();
+            } catch (error) {
+                if (error.name !== 'AbortError') showToast("Error creating database file.", true);
+            }
+        }
+
+        async function openDatabase() {
+            try {
+                const [handle] = await window.showOpenFilePicker({
+                    types: [{ description: 'JSON Database File', accept: { 'application/json': ['.json'] } }],
+                    multiple: false
+                });
+                fileHandle = handle;
+                const file = await fileHandle.getFile();
+                const contents = await file.text();
+                try {
+                    registryData = contents.trim() ? JSON.parse(contents) : [];
+                    if(!Array.isArray(registryData)) throw new Error("Invalid structure");
+                } catch(e) {
+                    registryData = [];
+                    showToast("Warning: File format invalid or empty.", true);
+                }
+                updateDBStatusUI(fileHandle.name);
+                showToast(`Loaded ${registryData.length} records`);
+                updateDashboard();
+            } catch (error) {
+                if (error.name !== 'AbortError') showToast("Error opening file.", true);
+            }
+        }
+
+        async function writeDataToFile(data) {
+            if (!fileHandle) throw new Error("No file handle.");
+            const writable = await fileHandle.createWritable();
+            await writable.write(JSON.stringify(data, null, 2));
+            await writable.close();
+        }
+
+        /* =========================================
+           FORM HANDLING & AUTO OPTIMIZATION
+        ========================================= */
+        const bayelsaCommunityLgaMap = {
+            // Yenagoa LGA
+            "yenagoa": "Yenagoa", "tombia": "Yenagoa", "agudama": "Yenagoa", "epie": "Yenagoa", "swali": "Yenagoa", 
+            "akenfa": "Yenagoa", "igbogene": "Yenagoa", "opolo": "Yenagoa", "biogbolo": "Yenagoa", "kpansia": "Yenagoa", 
+            "okutukutu": "Yenagoa", "etegwe": "Yenagoa", "edepie": "Yenagoa", "amarata": "Yenagoa", "onopa": "Yenagoa", 
+            "ovom": "Yenagoa", "ekeki": "Yenagoa", "yenezue": "Yenagoa", "ogu": "Yenagoa", "famgbe": "Yenagoa", 
+            "obogoro": "Yenagoa", "akaba": "Yenagoa", "ogbogoro": "Yenagoa", "bumoundi": "Yenagoa", "agbura": "Yenagoa", 
+            "gbarain": "Yenagoa", "ekpetiama": "Yenagoa", "biseni": "Yenagoa", "zarama": "Yenagoa", "ikolo": "Yenagoa",
+            
+            // Southern Ijaw LGA
+            "amassoma": "Southern Ijaw", "oporoma": "Southern Ijaw", "peremabiri": "Southern Ijaw", "ekowe": "Southern Ijaw", 
+            "otuan": "Southern Ijaw", "angiama": "Southern Ijaw", "opuama": "Southern Ijaw", "eniwari": "Southern Ijaw", 
+            "ondewari": "Southern Ijaw", "aguobiri": "Southern Ijaw", "korokorosei": "Southern Ijaw", "olugbobiri": "Southern Ijaw", 
+            "diebu": "Southern Ijaw", "igbomatoru": "Southern Ijaw", "azuzuama": "Southern Ijaw", "ukubie": "Southern Ijaw", 
+            "koluama": "Southern Ijaw", "foropa": "Southern Ijaw", "ebiabu": "Southern Ijaw", "keffes": "Southern Ijaw",
+            
+            // Ogbia LGA
+            "ogbia": "Ogbia", "otuoke": "Ogbia", "oloibiri": "Ogbia", "kolo": "Ogbia", "emeyal": "Ogbia", 
+            "anyama": "Ogbia", "otuasega": "Ogbia", "imiringi": "Ogbia", "elebele": "Ogbia", "ewoi": "Ogbia", 
+            "otuabagi": "Ogbia", "otuogidi": "Ogbia", "opume": "Ogbia", "akapelai": "Ogbia", "abobiri": "Ogbia", 
+            "idema": "Ogbia", "sokum": "Ogbia", "amorokeni": "Ogbia", "abulu": "Ogbia",
+            
+            // Nembe LGA
+            "nembe": "Nembe", "bassambiri": "Nembe", "ogbolomabiri": "Nembe", "oluasiri": "Nembe", "igbeta": "Nembe", 
+            "ewelesuo": "Nembe", "fantuo": "Nembe", "sikaka": "Nembe", "okoroma": "Nembe", "agbakabiri": "Nembe", 
+            "minni": "Nembe", "obioku": "Nembe", "dorgu": "Nembe",
+            
+            // Brass LGA
+            "twon": "Brass", "brass": "Brass", "akassa": "Brass", "sangana": "Brass", "okpoama": "Brass", 
+            "odioma": "Brass", "egweama": "Brass", "beletiama": "Brass", "liama": "Brass", "minibie": "Brass", 
+            "okonoma": "Brass", "mbokiri": "Brass", "egwema": "Brass", "cape formosa": "Brass",
+            
+            // Sagbama LGA
+            "sagbama": "Sagbama", "tungbo": "Sagbama", "toru-orua": "Sagbama", "toru orua": "Sagbama", "ebedebiri": "Sagbama", 
+            "adagbabiri": "Sagbama", "agbere": "Sagbama", "angalabiri": "Sagbama", "asamabiri": "Sagbama", "bolou": "Sagbama", 
+            "osekwenike": "Sagbama", "trofani": "Sagbama", "odoni": "Sagbama", "agoro": "Sagbama", "tungbabiri": "Sagbama", 
+            "ofoni": "Sagbama", "ebeni": "Sagbama", "kabiama": "Sagbama", "elemebiri": "Sagbama",
+            
+            // Kolokuma/Opokuma LGA
+            "kaiama": "Kolokuma/Opokuma", "odi": "Kolokuma/Opokuma", "sampou": "Kolokuma/Opokuma", "sabagreia": "Kolokuma/Opokuma", 
+            "igbedi": "Kolokuma/Opokuma", "ayibabiri": "Kolokuma/Opokuma", "kalama": "Kolokuma/Opokuma", "okoloba": "Kolokuma/Opokuma", 
+            "opokuma": "Kolokuma/Opokuma", "seibokorogha": "Kolokuma/Opokuma", "oyobu": "Kolokuma/Opokuma",
+            
+            // Ekeremor LGA
+            "ekeremor": "Ekeremor", "aleibiri": "Ekeremor", "amabulou": "Ekeremor", "ayamasa": "Ekeremor", "isampou": "Ekeremor", 
+            "peretorugbene": "Ekeremor", "ndoro": "Ekeremor", "ojobo": "Ekeremor", "aghoro": "Ekeremor", "tamigbe": "Ekeremor", 
+            "toru-ndoro": "Ekeremor", "ebisuo": "Ekeremor", "eduwini": "Ekeremor", "ngbene": "Ekeremor"
+        };
+
+        function autoSelectLGA() {
+            const communityInput = document.getElementById('community').value.toLowerCase().trim();
+            const lgaSelect = document.getElementById('lga');
+            for (const [comm, lga] of Object.entries(bayelsaCommunityLgaMap)) {
+                if (communityInput.includes(comm)) {
+                    lgaSelect.value = lga;
+                    return;
+                }
+            }
+        }
+
+        document.getElementById('whatsappImport').addEventListener('change', async function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (typeof JSZip === 'undefined') {
+                showToast("JSZip library not loaded. Ensure you have internet or local jszip.js.", true);
+                return;
+            }
+
+            try {
+                const zip = new JSZip();
+                const contents = await zip.loadAsync(file);
+                let txtFileName = null;
+                for (let filename in contents.files) {
+                    if (filename.endsWith('.txt')) {
+                        txtFileName = filename;
+                        break;
+                    }
+                }
+
+                if (!txtFileName) return showToast("No .txt file found inside ZIP.", true);
+
+                const textData = await contents.files[txtFileName].async("text");
+                parseWhatsAppText(textData);
+                event.target.value = ''; 
+                
+            } catch (error) {
+                console.error(error);
+                showToast("Error reading ZIP.", true);
+            }
+        });
+
+        function parseWhatsAppText(text) {
+            const lines = text.split('\n');
+            let data = {};
+
+            lines.forEach(line => {
+                const lowerLine = line.toLowerCase();
+                if (lowerLine.includes('dli type:')) {
+                    const match = line.match(/dli type:\s*(DLI 1\.1A|DLI 1\.3A)/i);
+                    if (match) data.dliType = match[1].toUpperCase();
+                }
+                if (lowerLine.includes('form number:')) {
+                    const match = line.match(/form number:\s*.*?(\b\d{4}\b)/i);
+                    if (match) data.formNumber = match[1];
+                }
+                if (lowerLine.includes('name of business owner:') || lowerLine.includes('business owner:')) {
+                    const match = line.match(/(?:name of business owner|business owner):\s*(.+)/i);
+                    if (match) data.ownerName = match[1].trim();
+                } else if (lowerLine.includes('name:')) {
+                    const match = line.match(/name:\s*(.+)/i);
+                    if (match && !data.ownerName && !lowerLine.includes('agent name')) data.ownerName = match[1].trim();
+                }
+                if (lowerLine.includes('phone number:')) {
+                    const match = line.match(/phone number:\s*([\d\+\-\s]+)/i);
+                    if (match) data.phoneNumber = match[1].trim();
+                }
+                if (lowerLine.includes('community:')) {
+                    const match = line.match(/community:\s*(.+)/i);
+                    if (match) data.community = match[1].trim();
+                }
+                if (lowerLine.includes('agent name:')) {
+                    const match = line.match(/agent name:\s*(.+)/i);
+                    if (match) data.agentName = match[1].trim();
+                }
+                if (lowerLine.includes('nature of business:')) {
+                    const match = line.match(/nature of business(?: activity)?:\s*(.+)/i);
+                    if (match) {
+                        const activity = match[1].trim().toLowerCase();
+                        const selectElement = document.getElementById('businessActivity');
+                        const options = Array.from(selectElement.options).map(opt => opt.value);
+                        const matchedOption = options.find(opt => opt.toLowerCase() === activity);
+                        data.businessActivity = matchedOption ? matchedOption : "Others";
+                    }
+                }
+            });
+
+            if (data.dliType) document.getElementById('dliType').value = data.dliType;
+            if (data.formNumber) document.getElementById('formNumber').value = data.formNumber;
+            if (data.ownerName) document.getElementById('ownerName').value = data.ownerName;
+            if (data.phoneNumber) document.getElementById('phoneNumber').value = data.phoneNumber;
+            if (data.community) {
+                document.getElementById('community').value = data.community;
+                autoSelectLGA(); 
+            }
+            if (data.businessActivity) document.getElementById('businessActivity').value = data.businessActivity;
+            if (data.agentName) document.getElementById('agentName').value = data.agentName;
+            showToast("Form auto-populated from ZIP file!");
+        }
+
+        function getBase64Image(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = (err) => reject(err);
+                reader.readAsDataURL(file);
+            });
+        }
+
+        document.getElementById('registryForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!fileHandle) {
+                alert("CRITICAL ERROR: No local database file is connected.\nPlease click 'Create New DB' or 'Open DB'.");
+                return;
+            }
+
+            const formNumVal = document.getElementById('formNumber').value;
+            if (!/^\d{4}$/.test(formNumVal)) return showToast("Form number must be exactly 4 digits.", true);
+
+            const isDuplicate = registryData.some(entry => entry.formNumber === formNumVal && entry.id !== editingId);
+            if (isDuplicate) {
+                alert(`CRITICAL ERROR:\nForm Number "${formNumVal}" already exists in the database!\nPlease assign a unique 4-digit number.`);
+                return; 
+            }
+
+            const btn = document.getElementById('submitBtn');
+            const btnTextSpan = document.getElementById('submitBtnText');
+            const originalText = btnTextSpan.innerHTML;
+            btnTextSpan.innerHTML = "Saving...";
+            btn.disabled = true;
+
+            try {
+                const fileInput = document.getElementById('businessPic');
+                let picBase64 = "";
+                if (fileInput.files.length > 0) {
+                    picBase64 = await getBase64Image(fileInput.files[0]);
+                }
+
+                if (editingId) {
+                    const index = registryData.findIndex(r => r.id === editingId);
+                    if (index !== -1) {
+                        registryData[index] = {
+                            ...registryData[index],
+                            dliType: document.getElementById('dliType').value,
+                            formNumber: document.getElementById('formNumber').value,
+                            ownerName: document.getElementById('ownerName').value,
+                            phoneNumber: document.getElementById('phoneNumber').value,
+                            businessActivity: document.getElementById('businessActivity').value,
+                            community: document.getElementById('community').value,
+                            lga: document.getElementById('lga').value,
+                            agentName: document.getElementById('agentName').value,
+                            enumDate: document.getElementById('enumDate').value,
+                            businessPic: picBase64 || registryData[index].businessPic 
+                        };
+                    }
+                    showToast("Record updated successfully!");
+                } else {
+                    const entry = {
+                        id: Date.now().toString(),
+                        dliType: document.getElementById('dliType').value,
+                        formNumber: document.getElementById('formNumber').value,
+                        ownerName: document.getElementById('ownerName').value,
+                        phoneNumber: document.getElementById('phoneNumber').value,
+                        businessActivity: document.getElementById('businessActivity').value,
+                        community: document.getElementById('community').value,
+                        lga: document.getElementById('lga').value,
+                        agentName: document.getElementById('agentName').value,
+                        enumDate: document.getElementById('enumDate').value,
+                        businessPic: picBase64,
+                        timestamp: new Date().toISOString()
+                    };
+                    registryData.push(entry);
+                    showToast("Record successfully saved to your PC database!");
+                }
+                
+                await writeDataToFile(registryData);
+                cancelEdit(); 
+                updateDashboard(); 
+                
+            } catch (err) {
+                console.error(err);
+                alert("Failed to save to database. You may need to re-grant file permissions.");
+            } finally {
+                btnTextSpan.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        });
+
+        async function deleteEntry(id) {
+            if(!confirm("Are you sure you want to delete this entry? This updates your local DB immediately.")) return;
+            registryData = registryData.filter(d => d.id !== id);
+            try {
+                await writeDataToFile(registryData);
+                showToast("Entry deleted successfully.");
+                updateDashboard();
+            } catch(e) {
+                showToast("Error deleting entry.", true);
+            }
+        }
+
+        function editEntry(id) {
+            const entry = registryData.find(d => d.id === id);
+            if(!entry) return;
+
+            editingId = id;
+            document.getElementById('dliType').value = entry.dliType;
+            document.getElementById('formNumber').value = entry.formNumber;
+            document.getElementById('ownerName').value = entry.ownerName;
+            document.getElementById('phoneNumber').value = entry.phoneNumber;
+            document.getElementById('businessActivity').value = entry.businessActivity;
+            document.getElementById('community').value = entry.community;
+            if(entry.lga) document.getElementById('lga').value = entry.lga;
+            document.getElementById('agentName').value = entry.agentName;
+            document.getElementById('enumDate').value = entry.enumDate;
+            
+            document.getElementById('submitBtnText').textContent = "Update Entry";
+            document.getElementById('cancelEditBtn').classList.remove('hidden');
+
+            switchTab('form');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            showToast("Edit mode active. Submit to save changes.");
+        }
+
+        function cancelEdit() {
+            editingId = null;
+            document.getElementById('registryForm').reset();
+            document.getElementById('enumDate').valueAsDate = new Date();
+            document.getElementById('submitBtnText').textContent = "Save Directly to PC";
+            document.getElementById('cancelEditBtn').classList.add('hidden');
+        }
+
+        /* =========================================
+           SORTING & DASHBOARD
+        ========================================= */
+        function handleSortChange() {
+            sortState.field = document.getElementById('sortField').value;
+            if (sortState.field === 'timestamp') {
+                sortState.order = 'desc';
+                document.getElementById('sortIconDesc').classList.remove('hidden');
+                document.getElementById('sortIconAsc').classList.add('hidden');
+            }
+            updateDashboard();
+        }
+
+        function toggleSortOrder() {
+            sortState.order = sortState.order === 'asc' ? 'desc' : 'asc';
+            const iconDesc = document.getElementById('sortIconDesc');
+            const iconAsc = document.getElementById('sortIconAsc');
+            
+            if (sortState.order === 'asc') {
+                iconDesc.classList.add('hidden');
+                iconAsc.classList.remove('hidden');
+            } else {
+                iconAsc.classList.add('hidden');
+                iconDesc.classList.remove('hidden');
+            }
+            updateDashboard();
+        }
+
+        function updateDashboard() {
+            const count11a = registryData.filter(d => d.dliType === 'DLI 1.1A').length;
+            const count13a = registryData.filter(d => d.dliType === 'DLI 1.3A').length;
+
+            document.getElementById('stat-total').textContent = registryData.length;
+            document.getElementById('stat-11a').textContent = count11a;
+            document.getElementById('stat-13a').textContent = count13a;
+
+            const tbody = document.getElementById('dataTableBody');
+            const emptyState = document.getElementById('empty-state');
+            tbody.innerHTML = '';
+            
+            if (registryData.length === 0) {
+                emptyState.classList.remove('hidden');
+            } else {
+                emptyState.classList.add('hidden');
+                
+                let displayData = [...registryData];
+                displayData.sort((a, b) => {
+                    let valA = a[sortState.field] || '';
+                    let valB = b[sortState.field] || '';
+                    if (typeof valA === 'string') valA = valA.toLowerCase();
+                    if (typeof valB === 'string') valB = valB.toLowerCase();
+                    if (valA < valB) return sortState.order === 'asc' ? -1 : 1;
+                    if (valA > valB) return sortState.order === 'asc' ? 1 : -1;
+                    return 0;
+                });
+
+                displayData.forEach(entry => {
+                    const tr = document.createElement('tr');
+                    const imgHtml = entry.businessPic 
+                        ? `<img src="${entry.businessPic}" class="h-10 w-10 rounded object-cover border border-gray-200 cursor-pointer" onclick="window.open('${entry.businessPic}')" title="Click to view">` 
+                        : `<span class="text-xs text-gray-400">No Image</span>`;
+
+                    tr.innerHTML = `
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${entry.formNumber}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-900">${entry.ownerName}</div>
+                            <div class="text-xs text-gray-500">${entry.phoneNumber}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${entry.businessActivity}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-900">${entry.community}</div>
+                            <div class="text-xs text-gray-500">${entry.lga || 'N/A'} LGA</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${entry.dliType === 'DLI 1.1A' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}">
+                                ${entry.dliType}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-600">${entry.enumDate}</div>
+                            <div class="text-xs text-gray-400">by ${entry.agentName}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">${imgHtml}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <button onclick="editEntry('${entry.id}')" class="text-blue-600 hover:text-blue-900 bg-blue-50 px-3 py-1 rounded-md mr-2 transition-colors">Edit</button>
+                            <button onclick="deleteEntry('${entry.id}')" class="text-red-600 hover:text-red-900 bg-red-50 px-3 py-1 rounded-md transition-colors">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+
+            updateCharts(count11a, count13a);
+        }
+
+        function updateCharts(count11a, count13a) {
+            const activityCounts = {};
+            registryData.forEach(d => {
+                activityCounts[d.businessActivity] = (activityCounts[d.businessActivity] || 0) + 1;
+            });
+            const activityLabels = Object.keys(activityCounts);
+            const activityData = Object.values(activityCounts);
+            const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#64748b', '#06b6d4'];
+
+            const actCtx = document.getElementById('activityChart');
+            if (actCtx && typeof Chart !== 'undefined') {
+                if (activityChartInstance) activityChartInstance.destroy();
+                activityChartInstance = new Chart(actCtx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: activityLabels,
+                        datasets: [{ label: 'Number of Businesses', data: activityData, backgroundColor: colors.slice(0, activityLabels.length), borderRadius: 4 }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+                });
+            }
+
+            const dliCtx = document.getElementById('dliChart');
+            if (dliCtx && typeof Chart !== 'undefined') {
+                if (dliChartInstance) dliChartInstance.destroy();
+                dliChartInstance = new Chart(dliCtx.getContext('2d'), {
+                    type: 'doughnut',
+                    data: { labels: ['DLI 1.1A', 'DLI 1.3A'], datasets: [{ data: [count11a, count13a], backgroundColor: ['#3b82f6', '#10b981'], borderWidth: 0, hoverOffset: 4 }] },
+                    options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { position: 'bottom' } } }
+                });
+            }
+        }
+
+        /* =========================================
+           EXPORT FUNCTIONALITY (EXCELJS NATIVE)
+        ========================================= */
+        async function exportExcelWithImages() {
+            if(registryData.length === 0) return showToast("No data to export.", true);
+            
+            if (typeof ExcelJS === 'undefined') {
+                showToast("ExcelJS library not loaded. Connect to internet or ensure exceljs.js is in folder.", true);
+                return;
+            }
+
+            try {
+                showToast("Generating Excel file with images. Please wait...");
+                
+                const workbook = new ExcelJS.Workbook();
+                const worksheet = workbook.addWorksheet('Registry Data');
+
+                // Set Columns
+                worksheet.columns = [
+                    { header: 'Form #', key: 'formNumber', width: 12 },
+                    { header: 'Owner Name', key: 'ownerName', width: 25 },
+                    { header: 'Phone Number', key: 'phoneNumber', width: 18 },
+                    { header: 'Activity', key: 'businessActivity', width: 25 },
+                    { header: 'Community', key: 'community', width: 20 },
+                    { header: 'LGA', key: 'lga', width: 20 },
+                    { header: 'DLI Type', key: 'dliType', width: 15 },
+                    { header: 'Agent Name', key: 'agentName', width: 20 },
+                    { header: 'Date', key: 'enumDate', width: 15 },
+                    { header: 'Image', key: 'businessPic', width: 18 }
+                ];
+
+                // Add Data and Images
+                registryData.forEach((entry, index) => {
+                    const row = worksheet.addRow({
+                        formNumber: entry.formNumber,
+                        ownerName: entry.ownerName,
+                        phoneNumber: entry.phoneNumber,
+                        businessActivity: entry.businessActivity,
+                        community: entry.community,
+                        lga: entry.lga,
+                        dliType: entry.dliType,
+                        agentName: entry.agentName,
+                        enumDate: entry.enumDate
+                    });
+
+                    // Set row height tall enough for images
+                    row.height = 75;
+
+                    // If image exists, process and attach it to Excel cell
+                    if (entry.businessPic) {
+                        const match = entry.businessPic.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/);
+                        if (match) {
+                            const ext = match[1] === 'jpeg' ? 'jpeg' : 'png';
+                            
+                            const imageId = workbook.addImage({
+                                base64: entry.businessPic,
+                                extension: ext,
+                            });
+
+                            // Place image in column index 9 (which is the 'Image' column, 0-indexed)
+                            worksheet.addImage(imageId, {
+                                tl: { col: 9, row: index + 1 },
+                                ext: { width: 100, height: 80 },
+                                editAs: 'oneCell'
+                            });
+                        }
+                    }
+                });
+
+                // Style Headers
+                worksheet.getRow(1).font = { bold: true };
+
+                // Generate Buffer and Download
+                const buffer = await workbook.xlsx.writeBuffer();
+                const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                
+                const dbName = fileHandle ? fileHandle.name.replace('.json', '') : 'registry';
+                link.download = `${dbName}_export_${new Date().toISOString().split('T')[0]}.xlsx`;
+                
+                link.click();
+                showToast("Excel (.xlsx) file downloaded successfully!");
+
+            } catch(e) {
+                console.error(e);
+                showToast("Error generating Excel file.", true);
+            }
+        }
+
+        function exportCSV() {
+            if(registryData.length === 0) return showToast("No data to export.", true);
+            
+            if (typeof Papa === 'undefined') {
+                showToast("PapaParse library not loaded. Ensure you have internet or local papaparse.js.", true);
+                return;
+            }
+
+            // Exclude the long base64 image data from CSV since it's unreadable text
+            const exportData = registryData.map(({businessPic, id, timestamp, ...rest}) => rest);
+            
+            const csv = Papa.unparse(exportData);
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            
+            const dbName = fileHandle ? fileHandle.name.replace('.json', '') : 'registry';
+            link.download = `${dbName}_export_${new Date().toISOString().split('T')[0]}.csv`;
+            
+            link.click();
+            showToast("Clean Text CSV Exported Successfully.");
+        }
+
+    </script>
+</body>
+</html>
